@@ -37,7 +37,7 @@ ES_EVERY_STEPS = 5e4
 ES_TRAIN_STEPS = 10
 PARTICLE_NUM = 100
 PER_EPISODE = 3
-EVAL_EPISODES = 1
+EVAL_EPISODES = 2300
 MEMORY_SIZE = int(1e6)
 BATCH_SIZE = 256
 GAMMA = 0.99
@@ -177,37 +177,68 @@ def run_train_episode(agent, env, rpm,max_step,action_bound,w=None,b=None):
     # print("success_rate:",success_num/episode_steps)
     return episode_reward, episode_steps,infos
 
+
 # Runs policy for 5 episodes by default and returns average reward
 # A fixed seed is used for the eval environment
-def run_evaluate_episodes(agent, env,max_step,action_bound,w=None,b=None):
+def run_evaluate_episodes(agent, env,max_step,action_bound,w=None,b=None, n_episodes=EVAL_EPISODES):
     avg_reward = 0.
     infos = {}
     steps_all = 0
-    obs,info = env.reset(ETG_w=w,ETG_b=b,x_noise=args.x_noise)
-    done = False
-    steps = 0
-    while not done:
-        steps +=1
-        if args.eval:
-            t0 = time.clock()
-        action = agent.predict(obs)
-        new_action = action
-        obs, reward, done, info = env.step(new_action*action_bound,donef=(steps>max_step))
-        if args.eval == 1:
-            img=p.getCameraImage(640, 480, renderer=p.ER_BULLET_HARDWARE_OPENGL)[2]
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB ) 
-            cv2.imwrite("img/img{}.jpg".format(steps),img)
-            # print("t:",time.clock()-t0)
-        avg_reward += reward
-        for key in Param_Dict.keys():
-            if key in info.keys():
-                if key not in infos.keys():
-                    infos[key] = info[key]
-                else:
-                    infos[key] += info[key]
-        if steps > max_step:
-            break
-    steps_all += steps
+    
+    observations = np.array([])
+    actions = np.array([])
+    rewards = np.array([])
+    next_observations = np.array([])
+    terminals = np.array([])
+
+    for i in range(n_episodes):
+        print('++++++'*20)
+        print('------'*20)
+        print(f"EPISODE {i} out of {EVAL_EPISODES}")
+        print('------'*20)
+        print('++++++'*20)
+        seed = np.random.randint(1,1000)
+        obs,info = env.reset(ETG_w=w,ETG_b=b,x_noise=args.x_noise, seed=seed)
+        done = False
+        # steps = 0
+        for step in range(max_step):
+            # steps +=1
+            # if args.eval:
+                # t0 = time.clock()
+            action = agent.predict(obs)
+            new_action = action
+            new_obs, reward, done, info = env.step(new_action*action_bound)#,donef=(steps>max_step))
+            if args.eval == 1:
+                #add to dataset
+                observations = np.append(observations, obs)
+                next_observations = np.append(next_observations, new_obs)
+                rewards = np.append(rewards, reward)
+                terminals = np.append(terminals, done)
+                actions = np.append(actions, new_action*action_bound)
+
+                img=p.getCameraImage(640, 480, renderer=p.ER_BULLET_HARDWARE_OPENGL)[2]
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB ) 
+                cv2.imwrite("img/img{}.jpg".format(step),img)
+                # print("t:",time.clock()-t0)
+            obs = new_obs
+            avg_reward += reward
+            for key in Param_Dict.keys():
+                if key in info.keys():
+                    if key not in infos.keys():
+                        infos[key] = info[key]
+                    else:
+                        infos[key] += info[key]
+            if done:
+                break
+    dataset = {
+        'observations': observations,
+        'actions': actions,
+        'rewards': rewards,
+        'next_observations': next_observations,
+        'terminals': terminals
+    }
+    np.save('dataset.npy', dataset)
+    steps_all += step
     return avg_reward,steps_all,infos
 
 def run_EStrain_episode(agent, env, rpm,max_step,action_bound,w=None,b=None):
@@ -370,7 +401,7 @@ def main():
             if (total_steps + 1) // EVAL_EVERY_STEPS >= test_flag:
                 while (total_steps + 1) // EVAL_EVERY_STEPS >= test_flag:
                     test_flag += 1
-                    avg_reward,avg_step,info = run_evaluate_episodes(agent, env,600,act_bound,w,b)
+                    avg_reward,avg_step,info = run_evaluate_episodes(agent, env,400,act_bound,w,b, EVAL_EPISODES)
                     logger.info('Evaluation over: {} episodes, Reward: {} Steps: {} '.format(
                     EVAL_EPISODES, avg_reward,avg_step))
                     summary.add_scalar('eval/episode_reward', avg_reward,
@@ -436,13 +467,13 @@ def main():
                 w,b,_ = Opt_with_points(ETG=ETG_agent,ETG_T=args.ETG_T,w0=w0,b0=b0,points=new_points)  
                 ES_solver.reset(ETG_best_param)
     elif args.eval == 1:
-        ETG_info = np.load(args.load[:-3]+".npz")
+        ETG_info = np.load(args.load[:-3]+".npz", fix_imports=True)
         w = ETG_info["w"]
         b = ETG_info["b"]
         outdir = os.path.join(args.load[:-3],args.task_mode)
         if not os.path.exists(args.load[:-3]):
             os.makedirs(args.load[:-3])
-        avg_reward,avg_step,info = run_evaluate_episodes(agent, env,600,act_bound,w,b)
+        avg_reward,avg_step,info = run_evaluate_episodes(agent, env,400,act_bound,w,b, EVAL_EPISODES)
         os.system("ffmpeg -r 38 -i img/img%01d.jpg -vcodec mpeg4 -vb 40M -y {}.mp4".format(outdir))
         os.system("rm -rf img/*")
         logger.info('Evaluation over: {} episodes, Reward: {} Steps: {}'.format(

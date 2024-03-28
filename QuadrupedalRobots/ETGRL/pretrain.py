@@ -153,6 +153,39 @@ def run_episode(env,max_step,w=None,b=None):
             break
     return episode_reward, episode_steps,infos
 
+# Runs policy for 5 episodes by default and returns average reward
+# A fixed seed is used for the eval environment
+def run_evaluate_episodes(agent, env,max_step,action_bound,w=None,b=None):
+    avg_reward = 0.
+    infos = {}
+    steps_all = 0
+    obs,info = env.reset(ETG_w=w,ETG_b=b,x_noise=args.x_noise)
+    done = False
+    steps = 0
+    while not done:
+        steps +=1
+        if args.eval:
+            t0 = time.clock()
+        action = agent.predict(obs)
+        new_action = action
+        obs, reward, done, info = env.step(new_action*action_bound,donef=(steps>max_step))
+        if args.eval == 1:
+            img=p.getCameraImage(640, 480, renderer=p.ER_BULLET_HARDWARE_OPENGL)[2]
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB ) 
+            cv2.imwrite("img/img{}.jpg".format(steps),img)
+            # print("t:",time.clock()-t0)
+        avg_reward += reward
+        for key in Param_Dict.keys():
+            if key in info.keys():
+                if key not in infos.keys():
+                    infos[key] = info[key]
+                else:
+                    infos[key] += info[key]
+        if steps > max_step:
+            break
+    steps_all += steps
+    return avg_reward,steps_all,infos
+
 
 def main():
     random_param['random_dynamics'] = args.random_dynamic
@@ -197,6 +230,7 @@ def main():
                         ETG_H = args.ETG_H, vel_d = args.vel_d,step_y=args.step_y,
                         enable_action_filter=args.enable_action_filter)
     e_step = args.e_step
+    best_reward = -1e9
 
     if not args.eval:
         outdir = os.path.join(args.outdir,args.suffix)
